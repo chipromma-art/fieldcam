@@ -229,13 +229,18 @@
       </div>
       <div class="flex-1 overflow-y-auto px-5 pb-4 space-y-4">
         <div>
-          <label for="inpProject" class="block text-sm text-slate-600 mb-1">ชื่อโครงการ (Project Name)</label>
+          <label for="inpProject" class="block text-sm text-slate-600 mb-1">Project</label>
           <input id="inpProject" type="text" maxlength="80" placeholder="เช่น ติดตั้งเสาไฟ ระยะที่ 2"
             class="w-full h-12 px-4 rounded-xl bg-slate-100 border border-transparent focus:border-yellow-500 focus:bg-white focus:outline-none" />
         </div>
         <div>
-          <label for="inpSite" class="block text-sm text-slate-600 mb-1">รหัสจุดงาน / Site ID</label>
-          <input id="inpSite" type="text" maxlength="40" placeholder="เช่น BKK-001"
+          <label for="inpJob" class="block text-sm text-slate-600 mb-1">ชื่องาน</label>
+          <input id="inpJob" type="text" maxlength="100" placeholder="เช่น ตรวจรับงานฐานราก"
+            class="w-full h-12 px-4 rounded-xl bg-slate-100 border border-transparent focus:border-yellow-500 focus:bg-white focus:outline-none" />
+        </div>
+        <div>
+          <label for="inpCct" class="block text-sm text-slate-600 mb-1">CCT no.</label>
+          <input id="inpCct" type="text" maxlength="40" placeholder="เช่น CCT-001"
             class="w-full h-12 px-4 rounded-xl bg-slate-100 border border-transparent focus:border-yellow-500 focus:bg-white focus:outline-none" />
         </div>
         <div>
@@ -370,7 +375,8 @@ const CONFIG = {
 /* ===================================================================== */
 const LS = {
   reporter: 'fc_reporter', passcode: 'fc_passcode', project: 'fc_project',
-  siteId: 'fc_siteId', note: 'fc_note', logo: 'fc_logo', ratio: 'fc_ratio'
+  jobName: 'fc_jobName', cctNo: 'fc_cctNo', legacySiteId: 'fc_siteId',
+  note: 'fc_note', logo: 'fc_logo', ratio: 'fc_ratio'
 };
 
 const state = {
@@ -387,7 +393,7 @@ const state = {
   lastGeoTime: 0,
   geoBusy: false,
   logoImg: null,
-  project: '', siteId: '', note: '',
+  project: '', jobName: '', cctNo: '', note: '',
   capturing: false,
   syncing: false,
   cancelSync: false,
@@ -414,14 +420,21 @@ function sanitizeName(s, fallback) {
   const v = String(s || '').trim().replace(/[\\/:*?"<>|#%&{}$!'@+`=]/g, '').replace(/\s+/g, '-');
   return v || fallback;
 }
-function buildFileName(project, siteId, stamp) {
-  return `${sanitizeName(project, 'NoProject')}_${sanitizeName(siteId, 'NoSite')}_${stamp}.jpg`;
+function buildFileName(project, cctNo, stamp) {
+  return `${sanitizeName(project, 'NoProject')}_${sanitizeName(cctNo, 'NoCCT')}_${stamp}.jpg`;
 }
 function esc(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 function genId() {
   return 'P' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 7).toUpperCase();
+}
+// รองรับรูปเก่าที่บันทึกไว้ด้วยฟิลด์ siteId และยังไม่มี jobName
+function normalizePhoto(p) {
+  if (!p) return p;
+  if (p.cctNo == null) p.cctNo = p.siteId || '';
+  if (p.jobName == null) p.jobName = '';
+  return p;
 }
 function haversine(a, b) {
   const R = 6371000, toRad = (x) => x * Math.PI / 180;
@@ -532,14 +545,14 @@ const DB = {
   get(id) {
     return new Promise((resolve, reject) => {
       const q = this.store('readonly').get(id);
-      q.onsuccess = () => resolve(q.result); q.onerror = () => reject(q.error);
+      q.onsuccess = () => resolve(normalizePhoto(q.result)); q.onerror = () => reject(q.error);
     });
   },
   getAll() {
     return new Promise((resolve, reject) => {
       if (!this.db) return resolve([]);
       const q = this.store('readonly').getAll();
-      q.onsuccess = () => resolve(q.result || []); q.onerror = () => reject(q.error);
+      q.onsuccess = () => resolve((q.result || []).map(normalizePhoto)); q.onerror = () => reject(q.error);
     });
   },
   delete(id) {
@@ -647,12 +660,19 @@ function logout() {
 
 /* ========================= Settings ========================= */
 function loadSettings() {
+  // ย้ายค่า Site ID เดิม (ถ้ามี) มาเป็น CCT no.
+  if (localStorage.getItem(LS.cctNo) === null && localStorage.getItem(LS.legacySiteId) !== null) {
+    localStorage.setItem(LS.cctNo, localStorage.getItem(LS.legacySiteId));
+    localStorage.removeItem(LS.legacySiteId);
+  }
   state.reporter = localStorage.getItem(LS.reporter) || '';
   state.project = localStorage.getItem(LS.project) || '';
-  state.siteId = localStorage.getItem(LS.siteId) || '';
+  state.jobName = localStorage.getItem(LS.jobName) || '';
+  state.cctNo = localStorage.getItem(LS.cctNo) || '';
   state.note = localStorage.getItem(LS.note) || '';
   $('inpProject').value = state.project;
-  $('inpSite').value = state.siteId;
+  $('inpJob').value = state.jobName;
+  $('inpCct').value = state.cctNo;
   $('inpNote').value = state.note;
   setLogo(localStorage.getItem(LS.logo));
   updateRatioButtons();
@@ -660,9 +680,10 @@ function loadSettings() {
   updateUserUI();
 }
 function updateInfoSummary() {
-  const p = state.project || 'ยังไม่ระบุโครงการ';
-  const s = state.siteId || '-';
-  $('infoSummary').textContent = `${p} · Site: ${s}`;
+  const p = state.project || 'ยังไม่ระบุ Project';
+  const j = state.jobName ? ` · ${state.jobName}` : '';
+  const c = state.cctNo || '-';
+  $('infoSummary').textContent = `${p}${j} · CCT: ${c}`;
 }
 function setLogo(dataUrl) {
   if (dataUrl) {
@@ -929,7 +950,8 @@ function buildWatermarkData(now) {
     acc: state.pos ? state.pos.acc : null,
     address: state.addressStatus === 'ok' ? state.address : '',
     project: state.project,
-    siteId: state.siteId,
+    jobName: state.jobName,
+    cctNo: state.cctNo,
     note: state.note,
     reporter: state.reporter,
     final: false
@@ -958,8 +980,9 @@ function drawWatermark(ctx, W, H, d, logo) {
   }
 
   const rows = [
-    { label: 'โครงการ', value: d.project || '-', max: 2 },
-    { label: 'Site ID', value: d.siteId || '-', max: 1 }
+    { label: 'Project', value: d.project || '-', max: 2 },
+    { label: 'ชื่องาน', value: d.jobName || '-', max: 2 },
+    { label: 'CCT no.', value: d.cctNo || '-', max: 1 }
   ];
   if (d.address) rows.push({ label: 'สถานที่', value: d.address, max: 3 });
   rows.push({ label: 'พิกัด', value: coordText, max: 1 });
@@ -1105,13 +1128,14 @@ async function capture() {
       timeText: d.time,
       reporter: state.reporter,
       project: state.project,
-      siteId: state.siteId,
+      jobName: state.jobName,
+      cctNo: state.cctNo,
       note: state.note,
       lat: d.lat, lng: d.lng, accuracy: d.acc,
       address: d.address,
       ratio: state.ratio,
       width: sw, height: sh,
-      fileName: buildFileName(state.project, state.siteId, stamp),
+      fileName: buildFileName(state.project, state.cctNo, stamp),
       status: 'pending',
       driveUrl: '',
       uploadedAt: '',
@@ -1150,6 +1174,7 @@ async function refreshPhotos() {
 }
 function tileHTML(p) {
   const up = p.status === 'uploaded';
+  const caption = p.cctNo || p.jobName || p.project || '-';
   return `
     <button data-id="${esc(p.id)}" class="relative aspect-square rounded-xl overflow-hidden bg-slate-200 active:scale-95 transition">
       <img src="${p.thumb}" class="w-full h-full object-cover" alt="" loading="lazy" />
@@ -1158,7 +1183,7 @@ function tileHTML(p) {
       </span>
       ${p.lat == null ? '<span class="absolute top-1 right-1 text-[9px] px-1 py-0.5 rounded bg-red-500 text-white">ไม่มี GPS</span>' : ''}
       <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/75 to-transparent text-white text-[10px] px-1.5 pt-4 pb-1 text-left truncate">
-        ${esc(p.siteId || p.project || '-')} · ${esc(p.timeText)}
+        ${esc(caption)} · ${esc(p.timeText)}
       </div>
     </button>`;
 }
@@ -1224,8 +1249,9 @@ async function openViewer(id) {
   const rows = [
     ['วันที่/เวลา', `${p.dateText} ${p.timeText}`],
     ['ผู้ถ่ายภาพ', p.reporter || '-'],
-    ['โครงการ', p.project || '-'],
-    ['Site ID', p.siteId || '-'],
+    ['Project', p.project || '-'],
+    ['ชื่องาน', p.jobName || '-'],
+    ['CCT no.', p.cctNo || '-'],
     ['พิกัด', coord],
     ['ที่อยู่', p.address || '-'],
     ['หมายเหตุ', p.note || '-'],
@@ -1250,8 +1276,9 @@ function closeViewer() {
 function buildShareText(p) {
   const lines = [
     `📷 รายงานภาคสนาม`,
-    `โครงการ: ${p.project || '-'}`,
-    `Site ID: ${p.siteId || '-'}`,
+    `Project: ${p.project || '-'}`,
+    `ชื่องาน: ${p.jobName || '-'}`,
+    `CCT no.: ${p.cctNo || '-'}`,
     `วันที่: ${p.dateText} ${p.timeText}`,
     `ผู้ถ่าย: ${p.reporter || '-'}`
   ];
@@ -1335,7 +1362,8 @@ async function uploadOne(p) {
     timeText: p.timeText,
     reporter: p.reporter,
     project: p.project,
-    siteId: p.siteId,
+    jobName: p.jobName,
+    cctNo: p.cctNo,
     lat: p.lat,
     lng: p.lng,
     accuracy: p.accuracy,
@@ -1415,20 +1443,21 @@ async function exportKMZ() {
   try {
     const kesc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const groups = {};
-    all.forEach((p) => { const k = p.project || 'ไม่ระบุโครงการ'; (groups[k] = groups[k] || []).push(p); });
+    all.forEach((p) => { const k = p.project || 'ไม่ระบุ Project'; (groups[k] = groups[k] || []).push(p); });
 
     const folders = Object.entries(groups).map(([proj, items]) => {
       const marks = items.map((p) => {
         const info = [
           ['วันที่/เวลา', `${p.dateText} ${p.timeText}`],
-          ['ผู้ถ่ายภาพ', p.reporter], ['โครงการ', p.project], ['Site ID', p.siteId],
+          ['ผู้ถ่ายภาพ', p.reporter], ['Project', p.project], ['ชื่องาน', p.jobName], ['CCT no.', p.cctNo],
           ['พิกัด', `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`], ['ที่อยู่', p.address], ['หมายเหตุ', p.note],
           ['สถานะ', p.status === 'uploaded' ? 'อัปโหลดแล้ว' : 'รออัปโหลด']
         ].map(([k, v]) => `<tr><td style="color:#64748b;padding:2px 8px 2px 0;white-space:nowrap">${esc(k)}</td><td>${esc(v || '-')}</td></tr>`).join('');
         const desc = `<div style="font-family:sans-serif;width:420px"><img src="files/${p.id}.jpg" width="420"/><table style="font-size:12px;margin-top:6px">${info}</table>${p.driveUrl ? `<p><a href="${esc(p.driveUrl)}">เปิดรูปใน Google Drive</a></p>` : ''}</div>`;
+        const pinName = [p.cctNo || 'จุดงาน', p.jobName, p.timeText].filter(Boolean).join(' ');
         return `
       <Placemark>
-        <name>${kesc((p.siteId || 'จุดงาน') + ' ' + p.timeText)}</name>
+        <name>${kesc(pinName)}</name>
         <TimeStamp><when>${p.createdAt}</when></TimeStamp>
         <styleUrl>#photoPin</styleUrl>
         <description><![CDATA[${desc}]]></description>
@@ -1549,7 +1578,8 @@ function bindEvents() {
   $('openInfoBtn').addEventListener('click', () => openSheet($('infoSheet')));
   $('infoSheet').querySelectorAll('[data-close]').forEach((el) => el.addEventListener('click', () => closeSheet($('infoSheet'))));
   $('inpProject').addEventListener('input', (e) => { state.project = e.target.value; localStorage.setItem(LS.project, state.project); updateInfoSummary(); drawOverlay(); });
-  $('inpSite').addEventListener('input', (e) => { state.siteId = e.target.value; localStorage.setItem(LS.siteId, state.siteId); updateInfoSummary(); drawOverlay(); });
+  $('inpJob').addEventListener('input', (e) => { state.jobName = e.target.value; localStorage.setItem(LS.jobName, state.jobName); updateInfoSummary(); drawOverlay(); });
+  $('inpCct').addEventListener('input', (e) => { state.cctNo = e.target.value; localStorage.setItem(LS.cctNo, state.cctNo); updateInfoSummary(); drawOverlay(); });
   $('inpNote').addEventListener('input', (e) => { state.note = e.target.value; localStorage.setItem(LS.note, state.note); drawOverlay(); });
   $('logoInput').addEventListener('change', async (e) => {
     const f = e.target.files && e.target.files[0];
