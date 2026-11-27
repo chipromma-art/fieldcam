@@ -960,7 +960,7 @@ function buildWatermarkData(now) {
 function drawWatermark(ctx, W, H, d, logo) {
   const base = Math.min(W, H);
   const land = W > H;
-  const fs = Math.max(9, base * (land ? 0.028 : 0.033));
+  const fs = Math.max(8, base * (land ? 0.022 : 0.027));
   const fsTime = fs * 2.0;
   const fsSmall = fs * 0.9;
   const lh = fs * 1.42;
@@ -1016,7 +1016,7 @@ function drawWatermark(ctx, W, H, d, logo) {
   const px = m, py = H - m - panelH;
 
   // พื้นหลังแผงลายน้ำ
-  ctx.fillStyle = 'rgba(15,23,42,0.62)';
+  ctx.fillStyle = 'rgba(15,23,42,0.38)';
   roundRectPath(ctx, px, py, panelW, panelH, fs * 0.7);
   ctx.fill();
   ctx.fillStyle = '#facc15';
